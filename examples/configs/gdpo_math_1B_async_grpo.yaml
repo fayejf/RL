@@ -1,0 +1,81 @@
+# GDPO + async GRPO training: replay-buffer async training with GDPO advantage (multi-reward).
+# Uses async_grpo_train; trajectories are collected via run_async_multi_turn_rollout (reward1, reward2 in batch).
+defaults: gdpo_math_1B.yaml
+
+grpo:
+  adv_estimator:
+    name: "gdpo"
+    normalize_rewards: true
+    use_leave_one_out_baseline: false
+  async_grpo:
+    enabled: true
+    max_trajectory_age_steps: 1
+    in_flight_weight_updates: false
+
+loss_fn:
+  use_importance_sampling_correction: true
+
+checkpointing:
+  checkpoint_dir: "results/gdpo_async_grpo"
+
+policy:
+  model_name: "Qwen/Qwen2.5-1.5B-Instruct"
+  logprob_batch_size: 4
+  max_total_sequence_length: 1024
+  generation:
+    vllm_cfg:
+      async_engine: true
+    colocated:
+      enabled: false
+      # Required when colocated is false: how many GPUs/nodes for inference.
+      # With 1 node, gpus_per_node must be set and > 0; train gets (cluster.gpus_per_node - gpus_per_node).
+      resources:
+        gpus_per_node: 4
+        num_nodes: 1
+  megatron_cfg:
+    optimizer:
+      weight_decay: 0.0
+    scheduler:
+      lr_decay_style: "cosine"
+      lr_warmup_iters: 10
+
+data:
+  _override_: true
+  max_input_seq_length: ${policy.max_total_sequence_length}
+  shuffle: true
+  num_workers: 1
+  use_multiple_dataloader: false
+  train:
+    dataset_name: "gsm8k"
+    split: train
+  validation:
+    dataset_name: "gsm8k"
+    split: test
+  default:
+    prompt_file: null
+    system_prompt_file: "examples/prompts/gsm8k.txt"
+    processor: "math_gdpo_data_processor"
+    env_name: "math_multi_reward"
+
+env:
+  math_multi_reward:
+    num_workers: 8
+    math_verify_impl: "hf_math_verify"
+
+logger:
+  wandb_enabled: true
+  wandb:
+    project: "gdpo-async-grpo-dev"
+    name: "gdpo-async-grpo-dev-logger"
+  swanlab:
+    project: "gdpo-async-grpo-dev"
+    name: "gdpo-async-grpo-dev-logger"
+  mlflow:
+    experiment_name: "gdpo-async-grpo-dev"
+    run_name: "gdpo-async-grpo-dev-logger"
+
+# Non-colocated async GRPO needs dedicated GPUs for inference; training uses the rest.
+# With 1 node, need at least 2 GPUs (e.g. 1 for inference, 1 for training). Override via CLI if needed.
+cluster:
+  gpus_per_node: 8
+  num_nodes: 1
