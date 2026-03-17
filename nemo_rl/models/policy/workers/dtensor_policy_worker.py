@@ -1861,9 +1861,13 @@ class DTensorPolicyWorkerImpl(AbstractPolicyWorker, ColocatablePolicyInterface):
             self.model = self.move_buffer_to_device(self.model, "cuda")
 
         self.model.train()
-        # Move optimizer state to CUDA before training so optimizer.step() sees same device as model/grads.
-        # Required after refit (offload_after_refit moves optimizer to CPU) and when offload_optimizer_for_logprob was used.
-        if self.optimizer is not None and not self.cpu_offload:
+        # Move optimizer state to CUDA if it exists
+        # colocated generation will always offload optimizer to cuda before refit
+        if (
+            self.optimizer is not None
+            and not self.cpu_offload
+            and (self.offload_optimizer_for_logprob or self.is_generation_colocated)
+        ):
             self.move_optimizer_to_device("cuda")
 
         torch.cuda.empty_cache()
